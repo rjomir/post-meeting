@@ -26,7 +26,8 @@
     "express": "^5.1.0",
     "google-auth-library": "^10.3.0",
     "googleapis": "^160.0.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "serverless-http": "^3.2.0"
   },
   "devDependencies": {
     "@radix-ui/react-label": "^2.1.7",
