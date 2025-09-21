@@ -21,7 +21,7 @@ function getOAuth2(req: any) {
 export const startGoogleOAuth: RequestHandler = async (req, res) => {
   try {
     const oAuth2Client = getOAuth2(req);
-    const url = oAuth2Client.generateAuthUrl({ access_type: "offline", scope: SCOPES, prompt: "consent" });
+    const url = oAuth2Client.generateAuthUrl({ access_type: "offline", scope: SCOPES, prompt: "consent", include_granted_scopes: true });
     res.redirect(url);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -30,7 +30,14 @@ export const startGoogleOAuth: RequestHandler = async (req, res) => {
 
 export const googleCallback: RequestHandler = async (req, res) => {
   try {
-    const code = req.query.code as string;
+    const err = (req.query.error as string) || "";
+    if (err) {
+      // User denied access or other OAuth error
+      return res.redirect(`/?google_error=${encodeURIComponent(err)}`);
+    }
+    const code = req.query.code as string | undefined;
+    if (!code) return res.status(400).json({ error: "OAuth code missing" });
+
     const oAuth2Client = getOAuth2(req);
     const { tokens } = await oAuth2Client.getToken(code);
     oAuth2Client.setCredentials(tokens);
@@ -49,7 +56,10 @@ export const googleCallback: RequestHandler = async (req, res) => {
 
     res.redirect("/");
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    try {
+      return res.redirect(`/?google_error=${encodeURIComponent(e?.message || "oauth_failed")}`);
+    } catch {}
+    res.status(500).json({ error: e?.message || "oauth error" });
   }
 };
 
@@ -112,7 +122,7 @@ export const listGoogleEvents: RequestHandler = async (req, res) => {
       });
 
       for (const cal of cals) {
-        const { data } = await calendar.events.list({
+        const { data } = await (calendar.events as any).list({
           calendarId: cal.id!,
           timeMin,
           timeMax,
@@ -151,14 +161,16 @@ export const listGoogleEvents: RequestHandler = async (req, res) => {
               conferencingUrl,
               platform,
             };
-          })
-          .filter((e) => e.platform !== "unknown" || e.attendees.length > 0 || !!e.conferencingUrl);
+          });
         all.push(...items);
       }
     } catch (e: any) {
       errors.push({ accountId: acc.id, error: e?.message || "failed to fetch" });
       continue;
     }
+  }
+  if (String(req.query.debug || "") === "1") {
+    return res.json({ events: all, errors });
   }
   res.json(all);
 };

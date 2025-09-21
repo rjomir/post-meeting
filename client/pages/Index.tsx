@@ -51,7 +51,10 @@ export default function Index() {
     return mapped.filter((e) => +new Date(e.start) >= now);
   }, [accountsKey, srvEvents]);
   const [srvMeetings, setSrvMeetings] = useState<Meeting[]>([] as any);
-  const meetings = useMemo(() => srvMeetings, [srvMeetings]);
+  const meetings = useMemo(() => {
+    const ids = new Set(accounts.map(a => a.id));
+    return srvMeetings.filter(m => ids.has(String(m.accountId || "")));
+  }, [srvMeetings, accounts]);
   const [pastLimit, setPastLimit] = useState(9);
   const visibleMeetings = useMemo(() => meetings.slice(0, Math.max(0, pastLimit)), [meetings, pastLimit]);
   const settings = store.getSettings();
@@ -109,14 +112,15 @@ export default function Index() {
 
       // Events
       try {
-        const evUrl = `/api/google/events?windowDays=${encodeURIComponent(String(settings.windowDays || 45))}&pastDays=14`;
-        if (shouldSkip(evUrl)) return;
-        const evRes = await fetchWithRetry(evUrl);
+        const evUrlBase = `/api/google/events?windowDays=${encodeURIComponent(String(settings.windowDays || 45))}&pastDays=14`;
+        if (shouldSkip(evUrlBase)) return;
+        const evRes = await fetchWithRetry(evUrlBase + "&debug=1");
         if (evRes.ok) {
-          const ev = await evRes.json();
-          const list: any[] = Array.isArray(ev) ? ev : [];
+          const data = await evRes.json();
+          const list: any[] = Array.isArray(data) ? data : Array.isArray(data?.events) ? data.events : [];
           setSrvEvents(list);
-          setEventsError(null);
+          const errs: any[] = Array.isArray((data as any)?.errors) ? (data as any).errors : [];
+          setEventsError(errs.length ? errs.map((e:any)=>`${e.accountId}: ${e.error}`).join("\n") : null);
 
           // Persist fetched events locally so we can track end/past state even if bot scheduling fails
           try {
@@ -481,70 +485,72 @@ export default function Index() {
           )}
         </Section>
 
-        <Section title="Past Meetings" action={<span className="text-xs text-muted-foreground">Click to view transcript & AI drafts</span>}>
-          {meetings.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No past meetings yet.</p>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {visibleMeetings.map((m) => {
-                const names = (m.attendees || []).map((a) => a.name || a.email);
-                const showNames = names.slice(0, 2);
-                const more = Math.max(0, names.length - showNames.length);
-                const avatars = (m.attendees || []).slice(0, 3);
-                const initials = (s: string) => {
-                  const n = s.includes('@') ? s.split('@')[0] : s;
-                  const parts = n.trim().split(/\s+/);
-                  const first = parts[0]?.[0] || '';
-                  const second = parts[1]?.[0] || '';
-                  return (first + second || first || '?').toUpperCase();
-                };
-                const status = m.media;
-                return (
-                  <button key={m.id} onClick={() => setOpenMeeting(m)} className="group text-left rounded-lg border p-3 md:p-4 hover:border-primary/50 hover:shadow-sm transition flex flex-col gap-2 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <PlatformIcon platform={m.platform} />
-                        <span>{new Date(m.start).toLocaleString()}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {status?.hasRecording && <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[10px]">Recording</span>}
-                        {status?.hasTranscript && <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 text-[10px]">Transcript</span>}
-                        {!(status?.hasRecording || status?.hasTranscript) && (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
-                            <svg viewBox="0 0 24 24" className="w-3 h-3"><circle cx="12" cy="12" r="10" fill="currentColor" /></svg>
-                            Processing…
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-1 font-medium line-clamp-1">{m.title}</div>
-
-                    {avatars.length > 0 && (
-                      <div className="mt-1 flex items-center gap-2">
-                        <div className="flex -space-x-2">
-                          {avatars.map((a, i) => (
-                            <div key={i} className="inline-grid place-items-center w-6 h-6 rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">
-                              {initials(a.name || a.email)}
-                            </div>
-                          ))}
+        {accounts.length > 0 && (
+          <Section title="Past Meetings" action={<span className="text-xs text-muted-foreground">Click to view transcript & AI drafts</span>}>
+            {meetings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No past meetings yet.</p>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {visibleMeetings.map((m) => {
+                  const names = (m.attendees || []).map((a) => a.name || a.email);
+                  const showNames = names.slice(0, 2);
+                  const more = Math.max(0, names.length - showNames.length);
+                  const avatars = (m.attendees || []).slice(0, 3);
+                  const initials = (s: string) => {
+                    const n = s.includes('@') ? s.split('@')[0] : s;
+                    const parts = n.trim().split(/\s+/);
+                    const first = parts[0]?.[0] || '';
+                    const second = parts[1]?.[0] || '';
+                    return (first + second || first || '?').toUpperCase();
+                  };
+                  const status = m.media;
+                  return (
+                    <button key={m.id} onClick={() => setOpenMeeting(m)} className="group text-left rounded-lg border p-3 md:p-4 hover:border-primary/50 hover:shadow-sm transition flex flex-col gap-2 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <PlatformIcon platform={m.platform} />
+                          <span>{new Date(m.start).toLocaleString()}</span>
                         </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {showNames.join(', ')}{more ? ` +${more} more` : ''}
+                        <div className="flex items-center gap-1">
+                          {status?.hasRecording && <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[10px]">Recording</span>}
+                          {status?.hasTranscript && <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 text-[10px]">Transcript</span>}
+                          {!(status?.hasRecording || status?.hasTranscript) && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
+                              <svg viewBox="0 0 24 24" className="w-3 h-3"><circle cx="12" cy="12" r="10" fill="currentColor" /></svg>
+                              Processing…
+                            </span>
+                          )}
                         </div>
                       </div>
-                    )}
-                  </button>
-                );
-              })}
-              {meetings.length > visibleMeetings.length && (
-                <div className="col-span-full mt-1 flex justify-center">
-                  <Button variant="outline" size="sm" onClick={() => setPastLimit((n) => n + 9)}>Load more</Button>
-                </div>
-              )}
-            </div>
-          )}
-        </Section>
+
+                      <div className="mt-1 font-medium line-clamp-1">{m.title}</div>
+
+                      {avatars.length > 0 && (
+                        <div className="mt-1 flex items-center gap-2">
+                          <div className="flex -space-x-2">
+                            {avatars.map((a, i) => (
+                              <div key={i} className="inline-grid place-items-center w-6 h-6 rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">
+                                {initials(a.name || a.email)}
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {showNames.join(', ')}{more ? ` +${more} more` : ''}
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+                {meetings.length > visibleMeetings.length && (
+                  <div className="col-span-full mt-1 flex justify-center">
+                    <Button variant="outline" size="sm" onClick={() => setPastLimit((n) => n + 9)}>Load more</Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Section>
+        )}
       </main>
 
       <footer className="container py-8 text-center text-xs text-muted-foreground">© {new Date().getFullYear()} PostMeeting</footer>
@@ -552,4 +558,4 @@ export default function Index() {
       {openMeeting && <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)} />}
     </div>
   );
-}
+};

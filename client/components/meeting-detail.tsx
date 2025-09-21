@@ -10,33 +10,34 @@ import { store } from "@/lib/store";
 export function MeetingDetail({ meeting, onClose }: { meeting: Meeting; onClose: () => void }) {
   const [content, setContent] = useState<GeneratedContent | undefined>(store.getContent(meeting.id));
   const [transcript, setTranscript] = useState(meeting.transcript);
-  const [emailDraft, setEmailDraft] = useState<{subject:string;body:string}>(() => content?.followupEmail ?? { subject: "", body: "" });
+  const [emailDraft, setEmailDraft] = useState<{ subject: string; body: string } | null>(() => content?.followupEmail ?? null);
   const [emailLoading, setEmailLoading] = useState(true);
   const [emailError, setEmailError] = useState<string | null>(null);
   const hasStoredEmail = Boolean(content?.followupEmail && (content.followupEmail.subject || content.followupEmail.body));
-  useEffect(() => {
-    const gen = async () => {
-      if (hasStoredEmail) { setEmailDraft(content!.followupEmail!); setEmailLoading(false); return; }
-      if (!transcript) { setEmailLoading(false); return; }
-      try {
-        setEmailLoading(true); setEmailError(null);
-        const r = await fetch('/api/ai/generate-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript }) });
-        if (r.ok) {
-          const data = await r.json();
-          if (data?.provider === 'openai' && data?.subject && data?.body) {
-            setEmailDraft({ subject: String(data.subject), body: String(data.body) });
-          } else if (data?.provider === 'rules') {
-            setEmailError('AI is temporarily unavailable. Please try again later.');
-          } else {
-            setEmailError('AI did not return an email.');
-          }
+  const generateEmailDraft = async () => {
+    if (hasStoredEmail) { setEmailDraft(content!.followupEmail!); setEmailLoading(false); return; }
+    if (!transcript) { setEmailLoading(false); return; }
+    try {
+      setEmailLoading(true); setEmailError(null);
+      const r = await fetch('/api/ai/generate-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript }) });
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.provider === 'openai' && data?.subject && data?.body) {
+          setEmailDraft({ subject: String(data.subject), body: String(data.body) });
+        } else if (data?.provider === 'rules') {
+          setEmailError('AI is temporarily unavailable. Please try again later.');
         } else {
-          const t = await r.clone().text(); setEmailError(t || 'Failed to generate email');
+          setEmailError('AI did not return an email.');
         }
-      } catch (e: any) { setEmailError(e?.message || 'Failed to generate email'); }
-      finally { setEmailLoading(false); }
-    };
-    gen();
+      } else {
+        const t = await r.clone().text(); setEmailError(t || 'Failed to generate email');
+      }
+    } catch (e: any) { setEmailError(e?.message || 'Failed to generate email'); }
+    finally { setEmailLoading(false); }
+  };
+
+  useEffect(() => {
+    generateEmailDraft();
   }, [transcript, hasStoredEmail]);
   const [platform, setPlatform] = useState<"linkedin" | "facebook">("linkedin");
   const currentTemplate = useMemo(() => {
@@ -96,7 +97,7 @@ export function MeetingDetail({ meeting, onClose }: { meeting: Meeting; onClose:
       // Mark as posted locally
       const c = content ?? {
         meetingId: meeting.id,
-        followupEmail: emailDraft,
+        followupEmail: emailDraft ?? { subject: "", body: "" },
         posts: [],
       };
       const others = c.posts.filter((p) => p.platform !== platform);
@@ -161,16 +162,26 @@ export function MeetingDetail({ meeting, onClose }: { meeting: Meeting; onClose:
                 <span>Generating email…</span>
               </div>
             ) : (
-              <div className="grid gap-2 text-sm">
-                <div className="font-semibold">Subject</div>
-                <input className="h-9 rounded-md border bg-background px-3 text-sm" value={emailDraft.subject} onChange={(e)=>setEmailDraft({...emailDraft, subject: e.target.value})} />
-                <div className="font-semibold mt-2">Body</div>
-                <textarea className="w-full min-h-32 text-sm rounded-md border bg-background p-3" value={emailDraft.body} onChange={(e)=>setEmailDraft({...emailDraft, body: e.target.value})} />
-                <div className="mt-2 flex items-center gap-2">
-                  <Button variant="outline" onClick={async ()=>{ await navigator.clipboard.writeText(`Subject: ${emailDraft.subject}\n\n${emailDraft.body}`); }}>Copy</Button>
+              emailDraft ? (
+                <div className="grid gap-2 text-sm">
+                  <div className="font-semibold">Subject</div>
+                  <input className="h-9 rounded-md border bg-background px-3 text-sm" value={emailDraft.subject} onChange={(e)=>setEmailDraft({ subject: e.target.value, body: emailDraft.body })} />
+                  <div className="font-semibold mt-2">Body</div>
+                  <textarea className="w-full min-h-32 text-sm rounded-md border bg-background p-3" value={emailDraft.body} onChange={(e)=>setEmailDraft({ subject: emailDraft.subject, body: e.target.value })} />
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button variant="outline" onClick={async ()=>{ await navigator.clipboard.writeText(`Subject: ${emailDraft.subject}\n\n${emailDraft.body}`); }}>Copy</Button>
+                  </div>
+                  {emailError && <p className="text-xs text-destructive">{emailError}</p>}
                 </div>
-                {emailError && <p className="text-xs text-destructive">{emailError}</p>}
-              </div>
+              ) : (
+                <div className="grid gap-2 text-sm">
+                  <p className="text-sm text-muted-foreground">No draft yet.</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button onClick={generateEmailDraft}>Generate</Button>
+                  </div>
+                  {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+                </div>
+              )
             )}
           </section>
 
