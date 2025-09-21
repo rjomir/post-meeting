@@ -1,0 +1,19 @@
+[build]
+  command = "pnpm install --frozen-lockfile=false && pnpm build"
+  publish = "dist/spa"
+
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
+# Route API requests to the serverless function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# SPA fallback for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
