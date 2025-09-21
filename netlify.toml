@@ -1,5 +1,5 @@
 [build]
-  command = "pnpm install --frozen-lockfile=false && pnpm build"
+  command = "pnpm install --frozen-lockfile=false && pnpm build:client"
   publish = "dist/spa"
 
 [functions]
